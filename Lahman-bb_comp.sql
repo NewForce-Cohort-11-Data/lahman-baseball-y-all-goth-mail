@@ -164,10 +164,14 @@ ORDER BY FLOOR(yearid/10)*10;
 
 SELECT 
     p.namefirst || ' ' || p.namelast AS player_name,
+    SUM(b.sb) as stolen_bases,
+    SUM(b.cs) as caught_stealing,
+    SUM(b.sb + b.cs) as total_attempts,
     ROUND((SUM(b.sb)::numeric / SUM(b.sb + b.cs)) * 100, 2) AS success_percentage
 FROM batting b
 JOIN people p ON b.playerid = p.playerid
 WHERE b.yearid = 2016
+  AND (b.sb > 0 OR b.cs > 0)  -- Ensure player had steal attempts
 GROUP BY p.playerid, p.namefirst, p.namelast
 HAVING SUM(b.sb + b.cs) >= 20
 ORDER BY success_percentage DESC
@@ -257,8 +261,8 @@ FROM max_win_teams;
 
 -- Write your SQL query below:
 
-(
-    -- TOP 5 teams with highest average attendance per game in 2016
+-- TOP 5 and BOTTOM 5 attendance in 2016
+WITH attendance_data AS (
     SELECT 
         h.park as park_name,
         t.name as team_name,
@@ -268,23 +272,23 @@ FROM max_win_teams;
     WHERE h.year = 2016
     GROUP BY h.park, h.team, t.name
     HAVING SUM(h.games) >= 10
-    ORDER BY avg_attendance_per_game DESC
-    LIMIT 5
+),
+ranked_attendance AS (
+    SELECT *,
+           ROW_NUMBER() OVER (ORDER BY avg_attendance_per_game DESC) as rank_high,
+           ROW_NUMBER() OVER (ORDER BY avg_attendance_per_game ASC) as rank_low
+    FROM attendance_data
 )
+SELECT park_name, team_name, avg_attendance_per_game, 'Top 5' as category
+FROM ranked_attendance 
+WHERE rank_high <= 5
 UNION ALL
-(
-    -- BOTTOM 5 teams with lowest average attendance per game in 2016
-    SELECT 
-        h.park as park_name,
-        t.name as team_name,
-        ROUND(SUM(h.attendance) * 1.0 / SUM(h.games), 0) as avg_attendance_per_game
-    FROM homegames h
-    JOIN teams t ON h.year = t.yearid AND h.team = t.teamid
-    WHERE h.year = 2016
-    GROUP BY h.park, h.team, t.name
-    HAVING SUM(h.games) >= 10
-    ORDER BY avg_attendance_per_game ASC
-    LIMIT 5);
+SELECT park_name, team_name, avg_attendance_per_game, 'Bottom 5' as category
+FROM ranked_attendance 
+WHERE rank_low <= 5
+ORDER BY 
+    CASE WHEN category = 'Top 5' THEN 1 ELSE 2 END,
+    avg_attendance_per_game DESC;
 
 
 
@@ -303,6 +307,9 @@ UNION ALL
 
 -- Write your SQL query below:
 
+-- First, let's check what manager awards exist
+-- SELECT DISTINCT awardid FROM awardsmanagers WHERE awardid LIKE '%Manager%' OR awardid LIKE '%TSN%';
+
 -- Find managers who won TSN Manager of the Year in both leagues
 WITH tsn_winners AS (
     SELECT DISTINCT
@@ -311,9 +318,7 @@ WITH tsn_winners AS (
         am.lgid,
         am.awardid
     FROM awardsmanagers am
-    WHERE am.awardid LIKE '%TSN%' 
-       OR am.awardid LIKE '%Manager of the Year%'
-       OR am.awardid = 'TSN Manager of the Year'
+    WHERE am.awardid = 'TSN Manager of the Year'
 ),
 dual_league_managers AS (
     SELECT 
@@ -336,8 +341,7 @@ JOIN tsn_winners tw ON dlm.playerid = tw.playerid
 JOIN managers m ON tw.playerid = m.playerid AND tw.yearid = m.yearid
 JOIN teams t ON m.yearid = t.yearid AND m.teamid = t.teamid
 WHERE tw.lgid IN ('NL', 'AL')
-ORDER BY p.namelast, p.namefirst, tw.yearid
-LIMIT 1;
+ORDER BY p.namelast, p.namefirst, tw.yearid;
 
 -- Question 10: Find all players who hit their career highest number of home runs in 2016. 
 -- Consider only players who have played in the league for at least 10 years, 
@@ -482,39 +486,37 @@ SELECT
     ROUND(CORR(attendance, wins)::numeric, 3) as attendance_wins_correlation
 FROM team_data;
 
--- Part B: World Series Winner Attendance Boost
+-- Part B: World Series Winner Attendance Boost (following year)
 WITH ws_teams AS (
     SELECT 
         t.yearid,
         t.teamid,
-        h.attendance as current_attendance,
-        LAG(h.attendance) OVER (PARTITION BY t.teamid ORDER BY t.yearid) as prev_attendance
+        h.attendance as ws_year_attendance,
+        LEAD(h.attendance) OVER (PARTITION BY t.teamid ORDER BY t.yearid) as next_year_attendance
     FROM teams t
     JOIN homegames h ON t.yearid = h.year AND t.teamid = h.team
     WHERE t.wswin = 'Y'
-      AND t.yearid > (SELECT MIN(yearid) FROM teams WHERE wswin = 'Y')
 )
 SELECT 
-    ROUND(AVG((current_attendance - prev_attendance) * 100.0 / prev_attendance), 2) as avg_attendance_boost_pct
+    ROUND(AVG((next_year_attendance - ws_year_attendance) * 100.0 / ws_year_attendance), 2) as avg_attendance_boost_pct
 FROM ws_teams
-WHERE prev_attendance IS NOT NULL AND prev_attendance > 0;
+WHERE next_year_attendance IS NOT NULL AND ws_year_attendance > 0;
 
--- Part C: Playoff Team Attendance Boost  
+-- Part C: Playoff Team Attendance Boost (following year)
 WITH playoff_teams AS (
     SELECT 
         t.yearid,
         t.teamid,
-        h.attendance as current_attendance,
-        LAG(h.attendance) OVER (PARTITION BY t.teamid ORDER BY t.yearid) as prev_attendance
+        h.attendance as playoff_year_attendance,
+        LEAD(h.attendance) OVER (PARTITION BY t.teamid ORDER BY t.yearid) as next_year_attendance
     FROM teams t
     JOIN homegames h ON t.yearid = h.year AND t.teamid = h.team
     WHERE (t.divwin = 'Y' OR t.wcwin = 'Y')
-      AND t.yearid > (SELECT MIN(yearid) FROM teams WHERE divwin = 'Y' OR wcwin = 'Y')
 )
 SELECT 
-    ROUND(AVG((current_attendance - prev_attendance) * 100.0 / prev_attendance), 2) as avg_attendance_boost_pct
+    ROUND(AVG((next_year_attendance - playoff_year_attendance) * 100.0 / playoff_year_attendance), 2) as avg_attendance_boost_pct
 FROM playoff_teams
-WHERE prev_attendance IS NOT NULL AND prev_attendance > 0;
+WHERE next_year_attendance IS NOT NULL AND playoff_year_attendance > 0;
 
 
 
@@ -548,17 +550,37 @@ WHERE EXISTS (SELECT 1 FROM pitching pt WHERE pt.playerid = p.playerid)
   AND throws IN ('L', 'R')
 GROUP BY throws;
 
--- Part 2: Effectiveness comparison
+-- Part 2: Effectiveness comparison (career averages for pitchers with significant innings)
+WITH pitcher_careers AS (
+    SELECT 
+        p.playerid,
+        p.throws,
+        SUM(pt.ipouts) as total_ipouts,
+        SUM(pt.er) as total_er,
+        SUM(pt.h + pt.bb) as total_walks_hits,
+        SUM(pt.w) as total_wins,
+        SUM(pt.l) as total_losses,
+        SUM(pt.so) as total_strikeouts
+    FROM pitching pt
+    JOIN people p ON pt.playerid = p.playerid
+    WHERE p.throws IN ('L', 'R')
+      AND pt.ipouts IS NOT NULL
+    GROUP BY p.playerid, p.throws
+    HAVING SUM(pt.ipouts) >= 1620  -- At least 540 innings pitched (equivalent to ~3+ seasons)
+)
 SELECT 
-    p.throws,
-    ROUND(AVG(pt.era::numeric), 3) as avg_era,
-    ROUND(AVG(pt.w::numeric / (pt.w + pt.l)), 3) as avg_win_pct
-FROM pitching pt
-JOIN people p ON pt.playerid = p.playerid
-WHERE p.throws IN ('L', 'R')
-  AND pt.ipouts >= 162
-  AND pt.w + pt.l > 0
-GROUP BY p.throws;
+    throws,
+    COUNT(*) as pitcher_count,
+    ROUND(AVG(total_er * 27.0 / total_ipouts), 3) as avg_era,
+    ROUND(AVG(CASE 
+        WHEN (total_wins + total_losses) > 0 
+        THEN total_wins * 1.0 / (total_wins + total_losses) 
+        ELSE NULL 
+    END), 3) as avg_win_pct,
+    ROUND(AVG(total_walks_hits * 27.0 / total_ipouts), 3) as avg_whip,
+    ROUND(AVG(total_strikeouts * 27.0 / total_ipouts), 2) as avg_k_per_game
+FROM pitcher_careers
+GROUP BY throws;
 
 -- Part 3: Cy Young Award analysis
 SELECT 
@@ -570,15 +592,16 @@ WHERE ap.awardid = 'Cy Young Award'
   AND p.throws IN ('L', 'R')
 GROUP BY p.throws;
 
--- Part 4: Hall of Fame analysis
+-- Part 4: Hall of Fame analysis (pitchers only)
 SELECT 
     p.throws,
-    COUNT(*) as hof_inductees
+    COUNT(*) as hof_inductees,
+    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) as hof_percentage
 FROM halloffame hof
 JOIN people p ON hof.playerid = p.playerid
-JOIN pitching pt ON p.playerid = pt.playerid
 WHERE hof.inducted = 'Y'
   AND p.throws IN ('L', 'R')
+  AND EXISTS (SELECT 1 FROM pitching pt WHERE pt.playerid = p.playerid)
 GROUP BY p.throws;
 
 
