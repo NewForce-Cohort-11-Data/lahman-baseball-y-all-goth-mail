@@ -303,17 +303,57 @@ FROM teams
 WHERE attendance IS NOT NULL
 ORDER BY attendance DESC;
 
-SELECT SUM(w)
-		,SUM(attendance)
-FROM teams;
+WITH avg_attendance AS 
+	(SELECT teamid
+			,ROUND(SUM(attendance) / SUM(w),0) AS avg_attendance_per_game
+	FROM teams
+	WHERE attendance IS NOT NULL
+	GROUP BY teamid)
+
+SELECT teamid
+		,avg_attendance_per_game
+FROM teams
+LEFT JOIN avg_attendance
+USING (teamid)
+WHERE attendance IS NOT NULL;
 
 
+WITH total_att_by_year AS 
+	(SELECT DISTINCT teamid
+			,yearid
+			,SUM(attendance) AS total_attendance
+	FROM teams
+	WHERE wswin = 'Y'
+		AND attendance IS NOT NULL
+	GROUP BY teamid, yearid
+	ORDER BY total_attendance DESC), 
 
+attendance_by_year_group AS 
+	(SELECT SUM(attendance) AS total_attendance_00_24
+	FROM teams
+	CROSS JOIN total_att_by_year
+	WHERE teams.yearid BETWEEN 1900 AND 1924
+UNION
+	SELECT SUM(attendance) AS total_attendance_25_49
+	FROM teams
+	CROSS JOIN total_att_by_year
+	WHERE teams.yearid BETWEEN 1925 AND 1949)
+
+SELECT *
+FROM total_att_by_year
+ORDER BY teamid;
+
+SELECT *
+FROM teams
+WHERE teamid = 'NYA';
 
 -- 13. It is thought that since left-handed pitchers are more rare, causing batters to face them less often, that they are more effective. 
 -- Investigate this claim and present evidence to either support or dispute this claim. 
 -- First, determine just how rare left-handed pitchers are compared with right-handed pitchers. 
 -- Are left-handed pitchers more likely to win the Cy Young Award? Are they more likely to make it into the hall of fame?
+
+
+
 
 
 SELECT *
