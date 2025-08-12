@@ -212,34 +212,38 @@ WITH natl_league AS
 		(SELECT NL1.playerid,
 				NL1.awardid,
 				NL1.yearid,
-				NL1.lgid,
-				NL2.name
+				NL1.lgid
 		FROM awardsmanagers AS NL1
-		CROSS JOIN teams AS NL2
 		WHERE NL1.lgid = 'NL'
 		AND NL1.awardid ILIKE '%TSN Manager%'),
 ameri_league AS 
 		(SELECT AL1.playerid,
 				AL1.awardid,
 				AL1.yearid,
-				AL1.lgid,
-				AL2.name
+				AL1.lgid
 		FROM awardsmanagers AS AL1
-		CROSS JOIN teams AS AL2
 		WHERE AL1.lgid = 'AL'
 		AND AL1.awardid ILIKE '%TSN Manager%')
 
 SELECT CONCAT(T3.namelast, ', ', T3.namefirst) AS nl_award_winner, 
 		T1.yearid AS NL_award_year, 
-		T1.name,
+		T5.name,
 		CONCAT(T3.namelast, ', ', T3.namefirst) AS al_award_winner, 
 		T2.yearid AS AL_award_year,
-		T2.name
+		T5.name
 FROM natl_league AS T1
 INNER JOIN ameri_league AS T2
 ON T1.playerid = T2.playerid
-INNER JOIN people AS T3
-ON T1.playerid = T3.playerid;
+LEFT JOIN people AS T3
+ON T1.playerid = T3.playerid
+LEFT JOIN appearances AS T4
+ON T1.playerid = T4.playerid
+LEFT JOIN teams AS T5
+ON T4.teamid = T5.teamid;
+
+-- struggling to narrow down the amount of rows presented-- this is not a problem until CROSS JOINs were added to CTEs(also tried to add in query level, no avail)
+
+
 
 -- 10. Find all players who hit their career highest number of home runs in 2016. 
 -- Consider only players who have played in the league for at least 10 years, and who hit at least one home run in 2016. 
@@ -258,18 +262,55 @@ ORDER BY max_homeruns_2016 DESC;
 -- *************************************************************Open-ended questions*************************************************************
 
 -- 11. Is there any correlation between number of wins and team salary? Use data from 2000 and later to answer this question. 
--- As you do this analysis, keep in mind that salaries across the whole league tend to increase together, so you may want to look on a year-by-year basis.
+-- As you do this analysis, keep in mind that salaries across the whole league tend to increase together, 
+-- so you may want to look on a year-by-year basis.
+WITH total_salaries_1 AS
+	(SELECT teamid
+			,SUM(salary::NUMERIC::MONEY) AS total_team_salary_00_05
+	FROM salaries
+	WHERE yearid BETWEEN 2000 AND 2005
+	GROUP BY teamid 
+	ORDER BY total_team_salary_00_05 DESC),
+total_salaries_2 AS
+	(SELECT teamid
+			,SUM(salary::NUMERIC::MONEY) AS total_team_salary_06_10
+	FROM salaries
+	WHERE yearid BETWEEN 2006 AND 2010
+	GROUP BY teamid 
+	ORDER BY total_team_salary_06_10 DESC),
+total_salaries_3 AS
+	(SELECT teamid
+			,SUM(salary::NUMERIC::MONEY) AS total_team_salary_11_16
+	FROM salaries
+	WHERE yearid BETWEEN 2011 AND 2016
+	GROUP BY teamid 
+	ORDER BY total_team_salary_11_16 DESC)
+
 SELECT *
-FROM salaries;
-
-
+FROM total_salaries_1 AS T1
+LEFT JOIN total_salaries_2 AS T2
+USING (teamid)
+LEFT JOIN total_salaries_3 AS T3
+USING (teamid);
 
 -- 12. In this question, you will explore the connection between number of wins and attendance.
-
--- 13. Does there appear to be any correlation between attendance at home games and number of wins?
+-- Does there appear to be any correlation between attendance at home games and number of wins?
 -- Do teams that win the world series see a boost in attendance the following year? What about teams that made the playoffs? 
 -- Making the playoffs means either being a division winner or a wild card winner.
--- It is thought that since left-handed pitchers are more rare, causing batters to face them less often, that they are more effective. 
+SELECT w
+		,attendance
+FROM teams
+WHERE attendance IS NOT NULL
+ORDER BY attendance DESC;
+
+SELECT SUM(w)
+		,SUM(attendance)
+FROM teams;
+
+
+
+
+-- 13. It is thought that since left-handed pitchers are more rare, causing batters to face them less often, that they are more effective. 
 -- Investigate this claim and present evidence to either support or dispute this claim. 
 -- First, determine just how rare left-handed pitchers are compared with right-handed pitchers. 
 -- Are left-handed pitchers more likely to win the Cy Young Award? Are they more likely to make it into the hall of fame?
