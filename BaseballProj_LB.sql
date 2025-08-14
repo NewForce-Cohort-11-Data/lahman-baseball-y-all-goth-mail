@@ -13,19 +13,32 @@ GROUP BY namefirst, namelast, g_all
 HAVING MIN(height) IS NOT NULL
 ORDER BY shortest ASC;
 
+-- forgot the team
+SELECT CONCAT(namefirst, ' ', namelast) AS playername, MIN(height) AS shortest, g_all, teams.name
+FROM people
+INNER JOIN appearances USING(playerid)
+INNER JOIN teams USING(teamid)
+GROUP BY playername, g_all, teams.name
+HAVING MIN(height) IS NOT NULL
+ORDER BY shortest ASC;
 
 -- 3. Find all players in the database who played at Vanderbilt University. 
 -- a.Create a list showing each player’s first and last names as well as the total salary they earned in the major leagues. 
 -- b. Sort this list in descending order by the total salary earned. Which Vanderbilt player earned the most money in the majors?
 
-SELECT namefirst, namelast, schoolname, SUM(salary::NUMERIC)::MONEY AS total_salary
+SELECT CONCAT(namefirst, ' ', namelast) AS people, SUM(salary)::NUMERIC::MONEY AS total_salary
 FROM people
-INNER JOIN collegeplaying USING(playerid)
-INNER JOIN schools USING(schoolid)
-INNER JOIN salaries USING(playerid)
-WHERE schoolname LIKE '%Vanderbilt%'
-GROUP BY namefirst, namelast, schoolname
-ORDER BY total_salary DESC;
+LEFT JOIN salaries USING(playerid)
+WHERE playerid IN
+  (SELECT playerid
+    FROM collegeplaying
+    INNER JOIN schools 
+    USING (schoolid)
+    WHERE schoolname ILIKE '%Vanderbilt%')
+GROUP BY people, playerid
+ORDER BY total_salary DESC NULLS LAST;
+
+
 
 -- 4. Using the fielding table, 
 -- a. group players into three groups based on their position: 
@@ -48,17 +61,41 @@ ORDER BY total_putouts DESC;
 -- 5. Find the average number of strikeouts per game by decade since 1920. Round the numbers you report to 2 decimal places. Do the same for home runs per game. Do you see any trends?
 
 -- SELECT SUM(so) AS strikeout_batter, SUM(soa) AS strikeout_pitcher
-WITH strikeout AS (SELECT ROUND(AVG(so),2) AS sout 
+
+WITH decades AS(
+SELECT
+(yearid / 10) * 10 AS decade,
+SUM(hr) AS total_hr,
+SUM(so) AS total_so,
+SUM(g) AS total_games
 FROM teams
-WHERE yearid >= 1920),
+WHERE yearid >= 1920
+GROUP BY decade
+)
 
-homeruns AS (SELECT ROUND(AVG(hr),2) AS runs
+SELECT decade, ROUND(total_so * 1.0 / total_games, 2) AS avg_strikeout,
+ROUND(total_hr * 1.0 / total_games, 2) AS avg_hr
+FROM decades
+ORDER BY decades;
+
+
+-- answer
+-- SELECT so, hr
+-- FROM teams
+-- WHERE yearid >= 1920
+
+WITH decades AS(
+SELECT
+(yearid / 10) * 10 AS decade, hr, so, g
 FROM teams
-WHERE yearid >= 1920)
-
-SELECT strikeout.sout AS avg_strikeouts,  homeruns.runs AS avg_homeruns
-FROM strikeout, homeruns;
-
+WHERE yearid >= 1920
+)
+SELECT decade
+, ROUND(SUM(hr) / SUM(g)::numeric,2) AS hr_per_game
+, ROUND(SUM(so) / SUM(g)::numeric,2) AS so_per_game
+FROM decades
+GROUP BY decade
+ORDER BY decade;
 
 --6. Find the player who had the most success stealing bases in 2016, where success is measured as the percentage of stolen base attempts which are successful. (A stolen base attempt results either in a stolen base or being caught stealing.) Consider only players who attempted at least 20 stolen bases.
 
@@ -68,37 +105,76 @@ INNER JOIN batting b USING(playerid)
 WHERE b.yearid = 2016 AND (sb + cs) >= 20
 ORDER BY success_rate DESC;
 
+-- answer
+SELECT namefirst, namelast, sb AS stolen_bases, cs AS caught_stealing, ROUND(100.0 * sb /(sb + cs), 2) AS success_rate
+FROM people
+INNER JOIN batting b USING(playerid)
+WHERE b.yearid = 2016
+GROUP BY namefirst, namelast, sb, cs
+HAVING SUM(sb) + SUM(cs) >= 20
+ORDER BY success_rate DESC;
+
 -- 7. 
 -- a. From 1970 – 2016, what is the largest number of wins for a team that did not win the world series? 
 -- b. What is the smallest number of wins for a team that did win the world series? Doing this will probably result in an unusually small number of wins for a world series champion – determine why this is the case. 
 -- c.Then redo your query, excluding the problem year. How often from 1970 – 2016 was it the case that a team with the most wins also won the world series? What percentage of the time?
 
+-- part a
 SELECT yearid,teamid, w AS large_wins
 FROM teams
 WHERE wswin = 'N' AND yearid BETWEEN 1970 AND 2016
 ORDER BY w DESC;
-
+-- part b
 SELECT yearid, teamid, w AS few_wins
 FROM teams
 WHERE wswin = 'Y' AND yearid BETWEEN 1970 AND 2016
 ORDER BY w ASC;
 
-
+-- part c
 WITH max_wins AS(SELECT yearid, MAX(w) AS max_wins
 FROM teams
 WHERE yearid BETWEEN 1970 AND 2016
 GROUP BY yearid
 ),
-winners AS(SELECT t.yearid
+winners AS(SELECT t.yearid, t.teamid 
 FROM teams t
 INNER JOIN max_wins m ON t.yearid = m.yearid AND t.w = m.max_wins
 WHERE t.wswin = 'Y'
 )
-SELECT 
+SELECT
 COUNT(*) AS times_best_team_won,
-47 AS total_years,
-ROUND(COUNT(*) * 100.0 / 47, 2) AS percentage
+(2016-1970) AS total_years,
+ROUND(COUNT(*) * 100.0 / (2016-1970), 2) AS percentage
 FROM winners;
+
+
+-- ANSWER part c
+
+WITH max_per_year AS (
+	SELECT
+		yearid,
+		MAX(w) max_wins
+	FROM
+		teams
+	WHERE 
+		yearid BETWEEN 1970 AND 2016
+	GROUP BY
+		yearid
+	ORDER BY
+		yearid
+)
+SELECT 
+	ROUND(((COUNT(yearid) / (2016-1970)::numeric)*100), 2) AS max_winner_percentage
+FROM
+	teams AS t
+INNER JOIN
+	max_per_year AS m
+	USING(yearid)
+WHERE 
+	yearid BETWEEN 1970 AND 2016
+	AND t.w = m.max_wins
+	AND wswin = 'Y';
+
 
 
 -- 8. Using the attendance figures from the homegames table, find the teams and parks which had the top 5 average attendance per game in 2016 (where average attendance is defined as total attendance divided by number of games). Only consider parks where there were at least 10 games played. Report the park name, team name, and average attendance. Repeat for the lowest 5 average attendance.
@@ -153,6 +229,26 @@ INNER JOIN managers m ON am.playerid = m.playerid
 INNER JOIN people p ON am.playerid = p.playerid
 WHERE am.awardid = 'TSN Manager of the Year'
 ORDER BY p.namelast, p.namefirst, am.yearid;
+
+
+-- Answer
+SELECT namefirst, 
+namelast,
+awardsmanagers.lgid,
+teams.name,
+awardid
+FROM managers 
+INNER JOIN teams
+USING(teamid,yearid)
+INNER JOIN people
+USING(playerid)
+INNER JOIN awardsmanagers
+USING(playerid)
+WHERE playerid IN(select playerid from awardsmanagers inner join managers using(playerid, yearid) where awardid LIKE '%TSN Manager of the Year%' AND awardsmanagers.lgid IN ('NL','AL'))
+AND awardid LIKE '%TSN Manager of the Year%' AND awardsmanagers.lgid IN ('NL','AL')
+
+
+
 
 
 
