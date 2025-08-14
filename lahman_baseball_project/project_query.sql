@@ -352,7 +352,8 @@ WHERE teamid = 'NYA';
 -- First, determine just how rare left-handed pitchers are compared with right-handed pitchers. 
 -- Are left-handed pitchers more likely to win the Cy Young Award? Are they more likely to make it into the hall of fame?
 
-
+SELECT *
+FROM people;
 
 
 
